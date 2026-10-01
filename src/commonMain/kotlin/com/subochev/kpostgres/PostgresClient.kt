@@ -1,0 +1,128 @@
+package com.subochev.kpostgres
+
+import com.subochev.kpostgres.internal.AuthType
+import com.subochev.kpostgres.internal.KtorSocketFactory
+import com.subochev.kpostgres.internal.MessageTag
+import com.subochev.kpostgres.internal.PgConnection
+import com.subochev.kpostgres.internal.PgSocketFactory
+import com.subochev.kpostgres.internal.SaslAuthHandler
+import com.subochev.kpostgres.internal.TransactionStatus
+import com.subochev.kpostgres.internal.executeSimpleQuery
+import com.subochev.kpostgres.internal.readAuthentication
+import com.subochev.kpostgres.internal.readErrorResponse
+import com.subochev.kpostgres.internal.readNoticeResponse
+import com.subochev.kpostgres.internal.readParameterStatus
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+
+public class PostgresClient internal constructor(
+    private val connection: PgConnection,
+    private val factory: PgSocketFactory,
+) : AutoCloseable {
+
+    public suspend fun query(sql: String): QueryResult {
+        return connection.executeSimpleQuery(sql)
+    }
+
+    public suspend fun execute(sql: String): Long {
+        val res = query(sql)
+        try {
+            return when (res) {
+                is QueryResult.Status -> res.rowsAffected
+                is QueryResult.Rows -> 0L
+            }
+        } finally {
+            res.close()
+        }
+    }
+
+    public val isClosed: Boolean
+        get() = connection.closed
+
+    public val transactionStatus: Char
+        get() = when (connection.transactionStatus()) {
+            TransactionStatus.IDLE -> 'I'
+            TransactionStatus.IN_TRANSACTION -> 'T'
+            TransactionStatus.IN_FAILED_TRANSACTION -> 'E'
+            else -> '?'
+        }
+
+    override fun close() {
+        if (connection.closed) return
+        runBlocking { connection.close() }
+    }
+
+    public companion object {
+        public suspend fun connect(
+            config: PostgresConfig,
+            dispatcher: CoroutineDispatcher = Dispatchers.Default,
+        ): PostgresClient {
+            val factory = KtorSocketFactory(dispatcher)
+            val socket = factory.open(config.host, config.port)
+            val conn = PgConnection(
+                config = config,
+                readChannel = socket.read,
+                writeChannel = socket.write,
+                socket = socket,
+                factory = factory,
+            )
+            try {
+                performStartup(conn, config)
+            } catch (e: Throwable) {
+                conn.close()
+                throw e
+            }
+            return PostgresClient(conn, factory)
+        }
+    }
+}
+
+private suspend fun performStartup(conn: PgConnection, config: PostgresConfig) {
+    conn.sendStartupMessage()
+    while (true) {
+        val frame = conn.receiveFrame()
+        when (frame.tag) {
+            MessageTag.AUTHENTICATION -> {
+                val authType = readAuthentication(frame)
+                when (authType) {
+                    AuthType.OK -> frame.end()
+                    AuthType.CLEARTEXT_PASSWORD -> {
+                        frame.end()
+                        conn.sendPassword(config.password)
+                    }
+                    AuthType.MD5_PASSWORD -> {
+                        throw PostgresException("MD5 password authentication is not supported")
+                    }
+                    AuthType.SASL -> {
+                        SaslAuthHandler().start(conn, config, frame)
+                    }
+                    else -> {
+                        frame.end()
+                        throw PostgresException("Unsupported authentication type: $authType")
+                    }
+                }
+            }
+            MessageTag.PARAMETER_STATUS -> {
+                readParameterStatus(frame)
+            }
+            MessageTag.BACKEND_KEY_DATA -> {
+                frame.end()
+            }
+            MessageTag.NOTICE_RESPONSE -> {
+                readNoticeResponse(frame)
+            }
+            MessageTag.ERROR_RESPONSE -> {
+                val err = readErrorResponse(frame)
+                throw PostgresException("Startup error: ${err.message}", sqlState = err.sqlState)
+            }
+            MessageTag.READY_FOR_QUERY -> {
+                val status = frame.readByte()
+                frame.end()
+                conn.updateTxStatus(status)
+                return
+            }
+            else -> frame.end()
+        }
+    }
+}
