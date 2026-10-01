@@ -50,7 +50,7 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }
 
-group = "com.subochev"
+group = "pw.binom.db"
 
 publishing {
     publications.withType<MavenPublication>().configureEach {
