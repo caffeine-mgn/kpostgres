@@ -1,7 +1,7 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.PostgresConfig
-import com.subochev.kpostgres.PostgresException
+import pw.binom.db.kpostgresql.PostgresConfig
+import pw.binom.db.kpostgresql.PostgresException
 import dev.whyoleg.cryptography.BinarySize.Companion.bytes
 import dev.whyoleg.cryptography.CryptographyProvider
 import dev.whyoleg.cryptography.algorithms.HMAC

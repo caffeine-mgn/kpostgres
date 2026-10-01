@@ -1,4 +1,4 @@
-package com.subochev.kpostgres
+package pw.binom.db.kpostgresql
 
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test

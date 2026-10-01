@@ -1,8 +1,8 @@
-package com.subochev.kpostgres
+package pw.binom.db.kpostgresql
 
-import com.subochev.kpostgres.internal.Oid
-import com.subochev.kpostgres.internal.PgConnection
-import com.subochev.kpostgres.internal.executeExtendedQuery
+import pw.binom.db.kpostgresql.internal.Oid
+import pw.binom.db.kpostgresql.internal.PgConnection
+import pw.binom.db.kpostgresql.internal.executeExtendedQuery
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 

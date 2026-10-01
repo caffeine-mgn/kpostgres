@@ -1,6 +1,6 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.PostgresException
+import pw.binom.db.kpostgresql.PostgresException
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.io.Buffer

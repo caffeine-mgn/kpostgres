@@ -1,7 +1,7 @@
-package com.subochev.kpostgres
+package pw.binom.db.kpostgresql
 
-import com.subochev.kpostgres.internal.PgResultSet
-import com.subochev.kpostgres.internal.TextDecoders
+import pw.binom.db.kpostgresql.internal.PgResultSet
+import pw.binom.db.kpostgresql.internal.TextDecoders
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 

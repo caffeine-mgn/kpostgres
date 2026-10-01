@@ -1,4 +1,4 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
 internal object MessageTag {
     const val PARSE: Byte = 'P'.code.toByte()

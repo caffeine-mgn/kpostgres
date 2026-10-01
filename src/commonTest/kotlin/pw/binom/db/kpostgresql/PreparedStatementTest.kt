@@ -1,7 +1,7 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.PostgresConfig
-import com.subochev.kpostgres.QueryResult
+import pw.binom.db.kpostgresql.PostgresConfig
+import pw.binom.db.kpostgresql.QueryResult
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.writeFully
@@ -202,11 +202,11 @@ class PreparedStatementTest {
                             frame.end()
                             conn.sendPassword(config.password)
                         }
-                        AuthType.MD5_PASSWORD -> throw com.subochev.kpostgres.PostgresException("MD5 not supported")
+                        AuthType.MD5_PASSWORD -> throw pw.binom.db.kpostgresql.PostgresException("MD5 not supported")
                         AuthType.SASL -> SaslAuthHandler().start(conn, config, frame)
                         else -> {
                             frame.end()
-                            throw com.subochev.kpostgres.PostgresException("Auth $type not supported")
+                            throw pw.binom.db.kpostgresql.PostgresException("Auth $type not supported")
                         }
                     }
                 }
@@ -215,7 +215,7 @@ class PreparedStatementTest {
                 MessageTag.NOTICE_RESPONSE -> readNoticeResponse(frame)
                 MessageTag.ERROR_RESPONSE -> {
                     val err = readErrorResponse(frame)
-                    throw com.subochev.kpostgres.PostgresException("Startup error: ${err.message}", sqlState = err.sqlState)
+                    throw pw.binom.db.kpostgresql.PostgresException("Startup error: ${err.message}", sqlState = err.sqlState)
                 }
                 MessageTag.READY_FOR_QUERY -> {
                     val s = frame.readByte()

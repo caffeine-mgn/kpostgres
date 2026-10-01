@@ -1,9 +1,9 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.ColumnMeta
-import com.subochev.kpostgres.PostgresException
-import com.subochev.kpostgres.PostgresProtocolException
-import com.subochev.kpostgres.QueryResult
+import pw.binom.db.kpostgresql.ColumnMeta
+import pw.binom.db.kpostgresql.PostgresException
+import pw.binom.db.kpostgresql.PostgresProtocolException
+import pw.binom.db.kpostgresql.QueryResult
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.Buffer
@@ -81,10 +81,10 @@ private suspend fun PgConnection.readSimpleQueryResult(): QueryResult {
                 val status = frame.readByte()
                 frame.end()
                 updateTxStatus(status)
-                if (columns != null) {
+                if (columns != null && columns.isNotEmpty()) {
                     return QueryResult.Rows(columns, PgResultSet(columns, rows))
                 }
-                if (commandCompleteSeen) {
+                if (commandCompleteSeen || columns != null) {
                     return QueryResult.Status(command = lastCommand, rowsAffected = lastRowsAffected)
                 }
                 throw PostgresProtocolException("ReadyForQuery without any preceding result")

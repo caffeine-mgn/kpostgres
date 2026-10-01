@@ -1,6 +1,6 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.ColumnMeta
+import pw.binom.db.kpostgresql.ColumnMeta
 
 internal class PgResultSet internal constructor(
     val columns: List<ColumnMeta>,
@@ -20,7 +20,7 @@ internal class PgResultSet internal constructor(
     }
 
     internal fun getRaw(index: Int): ByteArray? {
-        val row = currentRow ?: throw com.subochev.kpostgres.PostgresException("No current row; call next() first")
+        val row = currentRow ?: throw pw.binom.db.kpostgresql.PostgresException("No current row; call next() first")
         if (index < 0 || index >= row.size) {
             throw IndexOutOfBoundsException("Column index $index out of bounds [0, ${row.size})")
         }

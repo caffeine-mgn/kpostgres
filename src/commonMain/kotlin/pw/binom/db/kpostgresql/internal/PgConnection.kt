@@ -1,8 +1,8 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.PostgresConfig
-import com.subochev.kpostgres.PostgresConnectionClosedException
-import com.subochev.kpostgres.PostgresException
+import pw.binom.db.kpostgresql.PostgresConfig
+import pw.binom.db.kpostgresql.PostgresConnectionClosedException
+import pw.binom.db.kpostgresql.PostgresException
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.readByte

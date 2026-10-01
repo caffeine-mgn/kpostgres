@@ -1,4 +1,4 @@
-package com.subochev.kpostgres
+package pw.binom.db.kpostgresql
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

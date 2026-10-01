@@ -1,9 +1,9 @@
-package com.subochev.kpostgres.internal
+package pw.binom.db.kpostgresql.internal
 
-import com.subochev.kpostgres.ColumnMeta
-import com.subochev.kpostgres.PostgresException
-import com.subochev.kpostgres.PostgresProtocolException
-import com.subochev.kpostgres.QueryResult
+import pw.binom.db.kpostgresql.ColumnMeta
+import pw.binom.db.kpostgresql.PostgresException
+import pw.binom.db.kpostgresql.PostgresProtocolException
+import pw.binom.db.kpostgresql.QueryResult
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.sync.withLock
 import kotlinx.io.Buffer

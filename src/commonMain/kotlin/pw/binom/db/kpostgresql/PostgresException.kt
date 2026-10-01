@@ -1,4 +1,4 @@
-package com.subochev.kpostgres
+package pw.binom.db.kpostgresql
 
 public open class PostgresException(
     message: String,
