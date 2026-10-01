@@ -18,13 +18,19 @@ internal suspend fun PgConnection.executeExtendedQuery(
     params: List<Any?>,
 ): QueryResult {
     checkOpen()
-    return sendLock.withLock {
-        sendParse("", sql, paramTypes)
-        sendBind("", "", params, paramFormat = 0, resultFormat = 0)
-        sendDescribe("", 'P')
-        sendExecute("", 0)
-        sendSync()
-        readExtendedQueryResult()
+    markBusy()
+    return try {
+        sendLock.withLock {
+            sendParse("", sql, paramTypes)
+            sendBind("", "", params, paramFormat = 0, resultFormat = 0)
+            sendDescribe("", 'P')
+            sendExecute("", 0)
+            sendSync()
+            readExtendedQueryResult()
+        }
+    } catch (e: Throwable) {
+        markIdle()
+        throw e
     }
 }
 

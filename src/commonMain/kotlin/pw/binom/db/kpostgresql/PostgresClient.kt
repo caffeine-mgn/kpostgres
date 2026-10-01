@@ -66,6 +66,9 @@ public class PostgresClient internal constructor(
     public val isClosed: Boolean
         get() = connection.closed
 
+    public val isBusy: Boolean
+        get() = connection.isBusy
+
     public val transactionStatus: Char
         get() = when (connection.transactionStatus()) {
             TransactionStatus.IDLE -> 'I'

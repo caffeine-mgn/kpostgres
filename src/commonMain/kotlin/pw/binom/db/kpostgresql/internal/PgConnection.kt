@@ -23,11 +23,24 @@ internal class PgConnection internal constructor(
     internal var closed: Boolean = false
     internal var txStatus: Byte = TransactionStatus.IDLE
         private set
+    internal var busy: Boolean = false
+        private set
+
+    internal val isBusy: Boolean get() = busy
 
     internal fun transactionStatus(): Byte = txStatus
 
     internal fun updateTxStatus(status: Byte) {
         txStatus = status
+        busy = false
+    }
+
+    internal fun markBusy() {
+        busy = true
+    }
+
+    internal fun markIdle() {
+        busy = false
     }
 
     internal fun checkOpen() {
@@ -96,6 +109,7 @@ internal class PgConnection internal constructor(
     override suspend fun close() {
         if (closed) return
         closed = true
+        busy = false
         runCatching {
             sendTerminate()
         }

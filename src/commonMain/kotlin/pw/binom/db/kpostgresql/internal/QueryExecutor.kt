@@ -12,9 +12,15 @@ import kotlinx.io.writeString
 
 internal suspend fun PgConnection.executeSimpleQuery(sql: String): QueryResult {
     checkOpen()
-    return sendLock.withLock {
-        sendSimpleQuery(sql)
-        readSimpleQueryResult()
+    markBusy()
+    return try {
+        sendLock.withLock {
+            sendSimpleQuery(sql)
+            readSimpleQueryResult()
+        }
+    } catch (e: Throwable) {
+        markIdle()
+        throw e
     }
 }
 

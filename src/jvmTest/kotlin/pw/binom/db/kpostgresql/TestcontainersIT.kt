@@ -1,5 +1,7 @@
 package pw.binom.db.kpostgresql
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -196,6 +198,39 @@ class TestcontainersIT : AbstractPgContainer() {
                     assertTrue(res.command.startsWith("CREATE"))
                     assertEquals(0L, res.rowsAffected)
                 }
+            }
+        }
+    }
+
+    @Test
+    fun isBusyClearsAfterQuery() {
+        runBlocking {
+            PostgresClient.connect(pgConfig()).use { client ->
+                assertEquals(false, client.isBusy)
+                client.query("SELECT 1 AS one").use { rows ->
+                    assertEquals(false, client.isBusy)
+                }
+                assertEquals(false, client.isBusy)
+            }
+        }
+    }
+
+    @Test
+    fun isBusyDuringLongQuery() {
+        runBlocking {
+            PostgresClient.connect(pgConfig()).use { client ->
+                val seenBusy = ArrayList<Boolean>(1)
+                val launcher = launch {
+                    client.query("SELECT pg_sleep(0.3)").use { res ->
+                        val rows = res as QueryResult.Rows
+                        rows.next()
+                    }
+                }
+                delay(50)
+                seenBusy += client.isBusy
+                launcher.join()
+                assertEquals(true, seenBusy.single(), "Connection must be busy while pg_sleep runs")
+                assertEquals(false, client.isBusy)
             }
         }
     }
