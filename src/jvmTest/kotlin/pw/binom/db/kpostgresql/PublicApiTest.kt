@@ -117,12 +117,14 @@ class PublicApiTest {
     }
 
     private fun makeClient(): PostgresClient {
-        val host = System.getenv("PGHOST") ?: "127.0.0.1"
-        val port = System.getenv("PGPORT")?.toIntOrNull() ?: 5432
-        val db = System.getenv("PGDATABASE") ?: "kp_test"
-        val user = System.getenv("PGUSER") ?: "kpgtest"
-        val password = System.getenv("PGPASSWORD") ?: "kp_secret"
-        val config = PostgresConfig.of(host, port, db, user, password)
+        val container = AbstractPgContainer.startOnce()
+        val config = PostgresConfig.of(
+            host = container.host,
+            port = container.firstMappedPort,
+            database = container.databaseName,
+            user = container.username,
+            password = container.password,
+        )
         return runBlocking { PostgresClient.connect(config) }
     }
 }

@@ -27,5 +27,11 @@ abstract class AbstractPgContainer {
                 c.password,
             )
         }
+
+        @JvmStatic
+        fun startOnce(): PostgreSQLContainer<*> {
+            postgres.start()
+            return postgres
+        }
     }
 }
