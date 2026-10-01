@@ -1,8 +1,8 @@
+import org.gradle.plugins.signing.SigningExtension
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.nexus.publish)
-    `maven-publish`
-    signing
+    alias(libs.plugins.vanniktech.maven.publish)
 }
 
 val releaseVersion: String = (project.findProperty("version") as String?)
@@ -52,52 +52,52 @@ tasks.withType<Test>().configureEach {
 
 group = "pw.binom.db"
 
-publishing {
-    publications.withType<MavenPublication>().configureEach {
-        artifactId = "kpostgres"
-        pom {
-            name = "kpostgres"
-            description = "Multiplatform Postgres client over Ktor CIO + kotlinx-io, supporting JVM, iOS, macOS, Linux and Windows native targets."
-            url = "https://github.com/subochev/kpostgres"
-            inceptionYear = "2026"
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
 
-            licenses {
-                license {
-                    name = "Apache License 2.0"
-                    url = "https://www.apache.org/licenses/LICENSE-2.0"
-                }
-            }
+    coordinates(
+        groupId = "pw.binom.db",
+        artifactId = "kpostgres",
+        version = project.version.toString(),
+    )
 
-            developers {
-                developer {
-                    id = "subochev"
-                    name = "Subochev"
-                }
-            }
+    pom {
+        name.set("kpostgres")
+        description.set("Multiplatform Postgres client over Ktor CIO + kotlinx-io, supporting JVM, iOS, macOS, Linux and Windows native targets.")
+        url.set("https://github.com/caffeine-mgn/kpostgres")
+        inceptionYear.set("2026")
 
-            scm {
-                connection = "scm:git:git://github.com/subochev/kpostgres.git"
-                developerConnection = "scm:git:ssh://git@github.com/subochev/kpostgres.git"
-                url = "https://github.com/subochev/kpostgres"
+        licenses {
+            license {
+                name.set("Apache License 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0")
             }
+        }
+
+        developers {
+            developer {
+                id.set("subochev")
+                name.set("Subochev")
+                email.set("caffeine.mgn@gmail.com")
+            }
+        }
+
+        scm {
+            connection.set("scm:git:git://github.com/caffeine-mgn/kpostgres.git")
+            developerConnection.set("scm:git:ssh://git@github.com/caffeine-mgn/kpostgres.git")
+            url.set("https://github.com/caffeine-mgn/kpostgres")
         }
     }
 }
 
-if (project.findProperty("signingUseGpg") == "true") {
-    signing {
-        useGpgCmd()
-    }
-}
-
-nexusPublishing {
-    packageGroup = "com.subochev"
-    repositories {
-        sonatype {
-            nexusUrl.set(uri("https://oss.sonatype.org/service/local/"))
-            snapshotRepositoryUrl.set(uri("https://oss.sonatype.org/content/repositories/snapshots/"))
-            username.set((project.findProperty("mavenCentralUsername") as String?) ?: "")
-            password.set((project.findProperty("mavenCentralPassword") as String?) ?: "")
+pluginManager.withPlugin("signing") {
+    if (findProperty("signingUseGpg") == "true") {
+        extensions.configure<SigningExtension>("signing") {
+            useGpgCmd()
         }
+        logger.lifecycle("[signing] Using system gpg via signing.gnupg.keyName=${findProperty("signing.gnupg.keyName")}")
+        return@withPlugin
     }
+    logger.lifecycle("[signing] No in-memory PGP key configured; publications will be signed by the publishing plugin only.")
 }

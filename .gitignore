@@ -19,3 +19,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# opencode / dreamer local state
+.veai/

@@ -208,7 +208,7 @@ jobs:
             GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
             PUBLISH_VERSION: ${{ github.ref_name }}
           run: |
-            ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository \
+            ./gradlew publishToMavenCentral \
               -Pversion=${PUBLISH_VERSION} \
               -PsigningUseGpg=true \
               -Psigning.gnupg.keyName="$GPG_KEY_ID" \
