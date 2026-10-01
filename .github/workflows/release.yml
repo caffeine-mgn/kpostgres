@@ -175,6 +175,7 @@ jobs:
             GPG_PASSPHRASE: ${{ secrets.GPG_PASSWORD }}
           run: |
             command -v gpg >/dev/null 2>&1 || brew install gnupg
+            mkdir -p ~/.gnupg
             echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
             echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
             gpgconf --reload gpg-agent
