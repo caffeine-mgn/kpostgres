@@ -1,0 +1,218 @@
+# Tag-triggered: any pushed tag of the form N.N.N (or N.N.N-suffix) starts a
+# Sonatype Central publish. The workflow forwards GITHUB_REF_NAME (the tag
+# itself) to Gradle as `-Pversion=` so build.gradle.kts picks it up as the
+# project version — the published artifact's name matches the release name.
+#
+# Two jobs:
+#
+# test (ubuntu-latest) — the fast gate. Runs jvmTest (with Testcontainers
+# postgres:16-alpine via the docker socket the runner already provides)
+# and compiles every native target (jvm / iosArm64 / iosSimulatorArm64 /
+# macosArm64 / linuxX64 / linuxArm64 / mingwX64). kpostgres ships no
+# Kotlin/Native runtime, so there are no native *tests* to run — compile
+# is enough.
+#
+# publish (macos-14) — the release host. macOS is the only Kotlin/Native
+# host that can build the Apple targets (macosArm64, iosArm64,
+# iosSimulatorArm64), and it cross-builds every other target from one box.
+# That keeps the whole publication in a single Sonatype Central
+# deployment. The publish job re-runs jvmTest (Testcontainers works on
+# macos-14 via the docker action) before uploading.
+#
+# Conventions mirror the rest of the caffeine-mgn/* repos (klua, ksqlite,
+# kdns, kn-clang-compiler-plugin): the GPG key is imported into the system
+# keyring once at job start, `signingUseGpg` flips the build over to
+# `useGpgCmd()`, and the Sonatype user token plus GPG key id/passphrase
+# are forwarded as `-PmavenCentral*` / `-Psigning.gnupg.*` Gradle
+# properties.
+#
+# Android SDK is intentionally absent: kpostgres has no `android()` target
+# in build.gradle.kts — the pure commonMain build compiles on Android
+# automatically if/when someone adds the target, so we don't drag the SDK
+# in pre-emptively. Likewise there's no JNI/jni_md.h provisioning, no
+# clang/mingw-w64 apt packages and no readelf ABI check — kpostgres
+# ships no native library that has to round-trip between Linux, macOS
+# and bionic.
+name: Release to Maven Central
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+
+env:
+  KONAN_VERSION: "2.3.21"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux gate: jvmTest via Testcontainers + compile every native target.
+  # ---------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+
+        - name: Set up JDK 21
+          uses: actions/setup-java@v4
+          with:
+            java-version: 21
+            distribution: liberica
+
+        - name: Setup Gradle
+          uses: gradle/actions/setup-gradle@v4
+
+        # Konan pre-fetch is done as a plain shell step (not via `./gradlew
+        # downloadKonan`): `downloadKonan` kicks off the download and
+        # returns within seconds even though the tarball hasn't finished
+        # downloading, leaving `~/.konan/.../konan/konan.properties`
+        # missing for downstream `downloadKonanToolchain*` tasks. Doing
+        # the download + extract here directly guarantees
+        # `konan.properties` exists first.
+        #
+        # The asset name is
+        # `kotlin-native-prebuilt-linux-x86_64-${KONAN_VERSION}.tar.gz`.
+        - name: Pre-fetch Kotlin/Native (linux x86_64)
+          run: |
+            set -euo pipefail
+            KONAN_DIR="$HOME/.konan/kotlin-native-prebuilt-linux-x86_64-${KONAN_VERSION}"
+            if [ ! -f "${KONAN_DIR}/konan/konan.properties" ]; then
+              echo "Downloading kotlin-native-prebuilt-linux-x86_64-${KONAN_VERSION}.tar.gz"
+              mkdir -p "${KONAN_DIR}"
+              curl -fsSL \
+                "https://github.com/JetBrains/kotlin/releases/download/v${KONAN_VERSION}/kotlin-native-prebuilt-linux-x86_64-${KONAN_VERSION}.tar.gz" \
+                | tar -xz --strip-components=1 -C "${KONAN_DIR}"
+            fi
+            ls "${KONAN_DIR}/konan/konan.properties"
+
+        # Linux is the host: arm64 and mingw toolchains are cross targets
+        # here, downloaded so the host-side compileKotlinLinuxArm64 /
+        # compileKotlinMingwX64 tasks can resolve headers.
+        - name: Pre-fetch cross toolchains
+          run: ./gradlew downloadKonanToolchainLinux_arm64 downloadKonanToolchainMingw_x64 --stacktrace
+
+        # Testcontainers spins up postgres:16-alpine via the runner's
+        # docker daemon automatically. The IT suite (AbstractPgContainer)
+        # also sets password_encryption=scram-sha-256 so the real SCRAM
+        # handshake is exercised end to end.
+        - name: Run JVM tests
+          run: ./gradlew jvmTest --stacktrace
+
+        # Native target compile gate: kpostgres has no native *tests* to run
+        # (no JNI, no klib loaded at startup), so a clean compile of every
+        # supported target is the equivalent of the linuxX64Test /
+        # macosArm64Test gates from klua.
+        - name: Compile every supported native target
+          run: |
+            ./gradlew \
+              compileKotlinIosArm64 \
+              compileKotlinIosSimulatorArm64 \
+              compileKotlinMacosArm64 \
+              compileKotlinLinuxX64 \
+              compileKotlinLinuxArm64 \
+              compileKotlinMingwX64 \
+              --stacktrace
+
+        - name: Repository hygiene (no build outputs tracked)
+          run: test "$(git ls-files | grep -cE '^(build|\.gradle)/')" = "0"
+
+  # ---------------------------------------------------------------------------
+  # Publish: macOS universal host (Apple + every cross target), one Central
+  # deployment.
+  # ---------------------------------------------------------------------------
+  publish:
+    needs: test
+    runs-on: macos-14
+    steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+
+        - name: Set up JDK 21
+          uses: actions/setup-java@v4
+          with:
+            java-version: 21
+            distribution: liberica
+
+        - name: Setup Gradle
+          uses: gradle/actions/setup-gradle@v4
+
+        # macOS runners don't ship a Docker daemon. setup-docker-action
+        # provisions colima so the Testcontainers IT suite (jvmTest)
+        # works on this host too — the same gate that ran on the Linux
+        # job runs again here as a final check before uploading.
+        - name: Set up Docker (colima)
+          uses: docker/setup-docker-action@v4
+
+        # Same rationale as the Linux job, with the macOS arm64 asset.
+        # The extracted directory name must match Konan's host expectation
+        # (`kotlin-native-prebuilt-macos-aarch64-<ver>`).
+        - name: Pre-fetch Kotlin/Native (macOS aarch64)
+          run: |
+            set -euo pipefail
+            KONAN_DIR="$HOME/.konan/kotlin-native-prebuilt-macos-aarch64-${KONAN_VERSION}"
+            if [ ! -f "${KONAN_DIR}/konan/konan.properties" ]; then
+              echo "Downloading kotlin-native-prebuilt-macos-aarch64-${KONAN_VERSION}.tar.gz"
+              mkdir -p "${KONAN_DIR}"
+              curl -fsSL \
+                "https://github.com/JetBrains/kotlin/releases/download/v${KONAN_VERSION}/kotlin-native-prebuilt-macos-aarch64-${KONAN_VERSION}.tar.gz" \
+                | tar -xz --strip-components=1 -C "${KONAN_DIR}"
+            fi
+            ls "${KONAN_DIR}/konan/konan.properties"
+
+        # macOS is the host, so EVERY non-Apple target is a cross target
+        # here.
+        - name: Pre-fetch cross toolchains
+          run: >-
+            ./gradlew
+            downloadKonanToolchainLinux_x64
+            downloadKonanToolchainLinux_arm64
+            downloadKonanToolchainMingw_x64
+            --stacktrace
+
+        # The GPG private key is stored in GitHub secrets with literal
+        # `\n` escapes (one-line encoding). `printf '%b'` interprets
+        # those escapes; the import is non-interactive
+        # (`--batch --pinentry-mode loopback`).
+        - name: Import GPG key
+          env:
+            GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+            GPG_PASSPHRASE: ${{ secrets.GPG_PASSWORD }}
+          run: |
+            command -v gpg >/dev/null 2>&1 || brew install gnupg
+            printf '%b' "$GPG_KEY" | gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --import
+            echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+            echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+            gpgconf --reload gpg-agent
+
+        # Final host-side gate on the publishing host: jvmTest
+        # re-exercises the SCRAM + extended-bind + transaction paths
+        # against the freshly built artifacts.
+        - name: Run JVM tests
+          run: ./gradlew jvmTest --stacktrace
+
+        # kpostgres has no native *tests* (no JNI, no klib loaded at
+        # runtime), so the macosArm64Test gate from klua is replaced by
+        # a clean compile of every Apple target on the Apple host. This
+        # guarantees the actual publication was assembled from a green
+        # build on the OS that ships it.
+        - name: Compile every Apple target on the Apple host
+          run: |
+            ./gradlew \
+              compileKotlinIosArm64 \
+              compileKotlinIosSimulatorArm64 \
+              compileKotlinMacosArm64 \
+              --stacktrace
+
+        - name: Publish to Maven Central
+          env:
+            GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+            GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
+            PUBLISH_VERSION: ${{ github.ref_name }}
+          run: |
+            ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository \
+              -Pversion=${PUBLISH_VERSION} \
+              -PsigningUseGpg=true \
+              -Psigning.gnupg.keyName="$GPG_KEY_ID" \
+              -Psigning.gnupg.passphrase="$GPG_PASSWORD" \
+              -PmavenCentralUsername=${{ secrets.CENTRAL_USERNAME }} \
+              -PmavenCentralPassword=${{ secrets.CENTRAL_PASSWORD }}

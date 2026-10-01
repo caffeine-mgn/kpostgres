@@ -7,6 +7,7 @@ kotlinx-datetime = "0.8.0"
 testcontainers = "1.21.4"
 junit5 = "5.13.4"
 whyoleg-cryptography = "0.6.0"
+nexus-publish = "2.0.0"
 
 [libraries]
 ktor-network = { group = "io.ktor", name = "ktor-network", version.ref = "ktor" }
@@ -24,3 +25,4 @@ whyoleg-cryptography-optimal = { group = "dev.whyoleg.cryptography", name = "cry
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+nexus-publish = { id = "io.github.gradle-nexus.publish-plugin", version.ref = "nexus-publish" }
