@@ -9,7 +9,7 @@ internal class PgResultSet internal constructor(
     private var cursor: Int = -1
     private var currentRow: Array<ByteArray?>? = null
 
-    internal suspend fun next(): Boolean {
+    internal fun next(): Boolean {
         cursor += 1
         if (cursor >= rows.size) {
             currentRow = null
@@ -29,7 +29,7 @@ internal class PgResultSet internal constructor(
 
     internal fun isNull(index: Int): Boolean = getRaw(index) == null
 
-    internal suspend fun close() = Unit
+    internal fun close() = Unit
 }
 
 internal suspend fun readRowDescription(frame: ServerMessage): List<ColumnMeta> {

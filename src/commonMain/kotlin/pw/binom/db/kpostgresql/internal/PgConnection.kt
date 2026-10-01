@@ -3,6 +3,7 @@ package pw.binom.db.kpostgresql.internal
 import pw.binom.db.kpostgresql.PostgresConfig
 import pw.binom.db.kpostgresql.PostgresConnectionClosedException
 import pw.binom.db.kpostgresql.PostgresException
+import pw.binom.db.kpostgresql.SuspendCloseable
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.readByte
@@ -17,7 +18,7 @@ internal class PgConnection internal constructor(
     internal val writeChannel: ByteWriteChannel,
     internal val socket: PgSocket,
     internal val factory: PgSocketFactory,
-) {
+) : SuspendCloseable {
     internal val sendLock = Mutex()
     internal var closed: Boolean = false
     internal var txStatus: Byte = TransactionStatus.IDLE
@@ -92,7 +93,7 @@ internal class PgConnection internal constructor(
         }
     }
 
-    internal suspend fun close() {
+    override suspend fun close() {
         if (closed) return
         closed = true
         runCatching {

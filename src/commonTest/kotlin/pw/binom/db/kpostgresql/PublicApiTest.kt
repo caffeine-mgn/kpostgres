@@ -13,65 +13,55 @@ class PublicApiTest {
 
     @Test
     fun preparedStatementExecuteQuery() = runBlocking {
-        val client = makeClient()
-        try {
-            val stmt = client.prepare("SELECT \$1::int AS a, \$2::text AS b")
-            val rows = stmt.executeQuery(7, "world")
-            assertEquals(2, rows.columns.size)
-            assertTrue(rows.next())
-            assertEquals(7, rows.getInt(0))
-            assertEquals("world", rows.getString(1))
-            rows.close()
-            stmt.close()
-        } finally {
-            client.close()
+        makeClient().use { client ->
+            client.prepare("SELECT \$1::int AS a, \$2::text AS b").use { stmt ->
+                stmt.executeQuery(7, "world").use { rows ->
+                    assertEquals(2, rows.columns.size)
+                    assertTrue(rows.next())
+                    assertEquals(7, rows.getInt(0))
+                    assertEquals("world", rows.getString(1))
+                }
+            }
         }
     }
 
     @Test
     fun preparedStatementExecuteReturnsRowsAffected() = runBlocking {
-        val client = makeClient()
-        try {
+        makeClient().use { client ->
             client.execute("CREATE TEMP TABLE _kp_api_t (id int, label text)")
-            val stmt = client.prepare("INSERT INTO _kp_api_t VALUES (\$1, \$2)")
-            val n = stmt.execute(1, "a") + stmt.execute(2, "b") + stmt.execute(3, "c")
-            assertEquals(3L, n)
-            stmt.close()
-            val rows = client.query("SELECT count(*) FROM _kp_api_t")
-            assertTrue(rows is QueryResult.Rows)
-            rows as QueryResult.Rows
-            assertTrue(rows.next())
-            assertEquals(3L, rows.getLong(0))
-            rows.close()
-        } finally {
-            client.close()
+            client.prepare("INSERT INTO _kp_api_t VALUES (\$1, \$2)").use { stmt ->
+                val n = stmt.execute(1, "a") + stmt.execute(2, "b") + stmt.execute(3, "c")
+                assertEquals(3L, n)
+            }
+            client.query("SELECT count(*) FROM _kp_api_t").use { res ->
+                assertTrue(res is QueryResult.Rows)
+                res as QueryResult.Rows
+                assertTrue(res.next())
+                assertEquals(3L, res.getLong(0))
+            }
         }
     }
 
     @Test
     fun transactionCommits() = runBlocking {
-        val client = makeClient()
-        try {
+        makeClient().use { client ->
             client.execute("CREATE TEMP TABLE _kp_tx_t (id int)")
             client.transaction {
                 it.execute("INSERT INTO _kp_tx_t VALUES (1),(2)")
             }
             assertEquals('I', client.transactionStatus)
-            val rows = client.query("SELECT count(*) FROM _kp_tx_t")
-            assertTrue(rows is QueryResult.Rows)
-            rows as QueryResult.Rows
-            assertTrue(rows.next())
-            assertEquals(2L, rows.getLong(0))
-            rows.close()
-        } finally {
-            client.close()
+            client.query("SELECT count(*) FROM _kp_tx_t").use { res ->
+                assertTrue(res is QueryResult.Rows)
+                res as QueryResult.Rows
+                assertTrue(res.next())
+                assertEquals(2L, res.getLong(0))
+            }
         }
     }
 
     @Test
     fun transactionRollbackOnException() = runBlocking {
-        val client = makeClient()
-        try {
+        makeClient().use { client ->
             client.execute("CREATE TEMP TABLE _kp_txr_t (id int)")
             try {
                 client.transaction {
@@ -82,21 +72,18 @@ class PublicApiTest {
                 assertEquals("boom", e.message)
             }
             assertEquals('I', client.transactionStatus)
-            val rows = client.query("SELECT count(*) FROM _kp_txr_t")
-            assertTrue(rows is QueryResult.Rows)
-            rows as QueryResult.Rows
-            assertTrue(rows.next())
-            assertEquals(0L, rows.getLong(0))
-            rows.close()
-        } finally {
-            client.close()
+            client.query("SELECT count(*) FROM _kp_txr_t").use { res ->
+                assertTrue(res is QueryResult.Rows)
+                res as QueryResult.Rows
+                assertTrue(res.next())
+                assertEquals(0L, res.getLong(0))
+            }
         }
     }
 
     @Test
     fun transactionRollbackOnQueryError() = runBlocking {
-        val client = makeClient()
-        try {
+        makeClient().use { client ->
             client.execute("CREATE TEMP TABLE _kp_txe_t (id int)")
             try {
                 client.transaction {
@@ -107,30 +94,25 @@ class PublicApiTest {
                 assertNotNull(e)
             }
             assertEquals('I', client.transactionStatus)
-            val rows = client.query("SELECT count(*) FROM _kp_txe_t")
-            assertTrue(rows is QueryResult.Rows)
-            rows as QueryResult.Rows
-            assertTrue(rows.next())
-            assertEquals(0L, rows.getLong(0))
-            rows.close()
-        } finally {
-            client.close()
+            client.query("SELECT count(*) FROM _kp_txe_t").use { res ->
+                assertTrue(res is QueryResult.Rows)
+                res as QueryResult.Rows
+                assertTrue(res.next())
+                assertEquals(0L, res.getLong(0))
+            }
         }
     }
 
     @Test
     fun uuidPreparedBind() = runBlocking {
-        val client = makeClient()
-        try {
+        makeClient().use { client ->
             val u = Uuid.parse("12345678-1234-5678-1234-567812345678")
-            val stmt = client.prepare("SELECT \$1::uuid AS u")
-            val rows = stmt.executeQuery(u)
-            assertTrue(rows.next())
-            assertEquals(u, rows.getUuid(0))
-            rows.close()
-            stmt.close()
-        } finally {
-            client.close()
+            client.prepare("SELECT \$1::uuid AS u").use { stmt ->
+                stmt.executeQuery(u).use { rows ->
+                    assertTrue(rows.next())
+                    assertEquals(u, rows.getUuid(0))
+                }
+            }
         }
     }
 

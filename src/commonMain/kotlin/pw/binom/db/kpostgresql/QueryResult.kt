@@ -15,21 +15,21 @@ public data class ColumnMeta(
     public val format: Short,
 )
 
-public sealed class QueryResult {
-    public abstract suspend fun close()
+public sealed class QueryResult : AutoCloseable {
+    public abstract override fun close()
 
     public class Status internal constructor(
         public val command: String,
         public val rowsAffected: Long,
     ) : QueryResult() {
-        override suspend fun close() = Unit
+        override fun close() = Unit
     }
 
     public class Rows internal constructor(
         public val columns: List<ColumnMeta>,
         internal val data: PgResultSet,
     ) : QueryResult() {
-        public suspend fun next(): Boolean = data.next()
+        public fun next(): Boolean = data.next()
 
         public fun getRaw(index: Int): ByteArray? = data.getRaw(index)
 
@@ -70,6 +70,6 @@ public sealed class QueryResult {
             return -1
         }
 
-        override suspend fun close() = data.close()
+        override fun close() = data.close()
     }
 }
