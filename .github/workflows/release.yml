@@ -16,8 +16,8 @@
 # host that can build the Apple targets (macosArm64, iosArm64,
 # iosSimulatorArm64), and it cross-builds every other target from one box.
 # That keeps the whole publication in a single Sonatype Central
-# deployment. The publish job re-runs jvmTest (Testcontainers works on
-# macos-14 via the docker action) before uploading.
+# deployment. jvmTest re-runs on the Linux job only — colima-based Docker
+# provisioning on macos-14 is unreliable (UEFI/QEMU firmware errors).
 #
 # Conventions mirror the rest of the caffeine-mgn/* repos (klua, ksqlite,
 # kdns, kn-clang-compiler-plugin): the GPG key is imported into the system
@@ -135,12 +135,11 @@ jobs:
         - name: Setup Gradle
           uses: gradle/actions/setup-gradle@v4
 
-        # macOS runners don't ship a Docker daemon. setup-docker-action
-        # provisions colima so the Testcontainers IT suite (jvmTest)
-        # works on this host too — the same gate that ran on the Linux
-        # job runs again here as a final check before uploading.
-        - name: Set up Docker (colima)
-          uses: docker/setup-docker-action@v4
+        # No Docker on macOS-14: jvmTest was already exercised on the
+        # Linux gate job. Provisioning colima here was unreliable on
+        # macos-14 (UEFI/QEMU firmware errors at startup, see first
+        # 0.1.0 release run). The Linux job is the test gate; the macOS
+        # job is the publication host only.
 
         # Same rationale as the Linux job, with the macOS arm64 asset.
         # The extracted directory name must match Konan's host expectation
@@ -178,11 +177,10 @@ jobs:
             echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
             gpgconf --reload gpg-agent
 
-        # Final host-side gate on the publishing host: jvmTest
-        # re-exercises the SCRAM + extended-bind + transaction paths
-        # against the freshly built artifacts.
-        - name: Run JVM tests
-          run: ./gradlew jvmTest --stacktrace
+        # The Testcontainers IT suite (jvmTest) was already run on the
+        # Linux gate job; on the publish host we just compile the Apple
+        # targets to verify the publication was assembled from a green
+        # build on the OS that ships it.
 
         # kpostgres has no native *tests* (no JNI, no klib loaded at
         # runtime), so the macosArm64Test gate from klua is replaced by
