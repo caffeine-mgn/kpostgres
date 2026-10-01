@@ -3,10 +3,12 @@ package com.subochev.kpostgres
 import com.subochev.kpostgres.internal.AuthType
 import com.subochev.kpostgres.internal.KtorSocketFactory
 import com.subochev.kpostgres.internal.MessageTag
+import com.subochev.kpostgres.internal.Oid
 import com.subochev.kpostgres.internal.PgConnection
 import com.subochev.kpostgres.internal.PgSocketFactory
 import com.subochev.kpostgres.internal.SaslAuthHandler
 import com.subochev.kpostgres.internal.TransactionStatus
+import com.subochev.kpostgres.internal.executeExtendedQuery
 import com.subochev.kpostgres.internal.executeSimpleQuery
 import com.subochev.kpostgres.internal.readAuthentication
 import com.subochev.kpostgres.internal.readErrorResponse
@@ -15,6 +17,8 @@ import com.subochev.kpostgres.internal.readParameterStatus
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 public class PostgresClient internal constructor(
     private val connection: PgConnection,
@@ -34,6 +38,28 @@ public class PostgresClient internal constructor(
             }
         } finally {
             res.close()
+        }
+    }
+
+    public suspend fun prepare(sql: String): PreparedStatement {
+        return PreparedStatement(connection, sql)
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    public suspend fun executeWithParams(sql: String, params: List<Any?>): QueryResult {
+        val types = params.map { pgTypeOf(it) }
+        return connection.executeExtendedQuery(sql, types, params)
+    }
+
+    public suspend fun <T> transaction(block: suspend (PostgresClient) -> T): T {
+        connection.executeSimpleQuery("BEGIN")
+        return try {
+            val result = block(this)
+            connection.executeSimpleQuery("COMMIT")
+            result
+        } catch (e: Throwable) {
+            runCatching { connection.executeSimpleQuery("ROLLBACK") }
+            throw e
         }
     }
 
@@ -76,6 +102,21 @@ public class PostgresClient internal constructor(
             return PostgresClient(conn, factory)
         }
     }
+}
+
+@OptIn(ExperimentalUuidApi::class)
+private fun pgTypeOf(value: Any?): Int = when (value) {
+    null -> 0
+    is Int -> Oid.INT4
+    is Long -> Oid.INT8
+    is Short -> Oid.INT2
+    is Float -> Oid.FLOAT4
+    is Double -> Oid.FLOAT8
+    is Boolean -> Oid.BOOL
+    is String -> Oid.TEXT
+    is Uuid -> Oid.UUID
+    is ByteArray -> Oid.BYTEA
+    else -> Oid.TEXT
 }
 
 private suspend fun performStartup(conn: PgConnection, config: PostgresConfig) {
