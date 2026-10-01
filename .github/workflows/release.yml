@@ -165,17 +165,24 @@ jobs:
         # The GPG private key is stored in GitHub secrets with literal
         # `\n` escapes (one-line encoding). `printf '%b'` interprets
         # those escapes; the import is non-interactive
-        # (`--batch --pinentry-mode loopback`).
+        # (`--batch --pinentry-mode loopback`). When the key has no
+        # passphrase (GPG_PASSWORD secret is unset/empty), `--passphrase`
+        # is omitted because gpg loopback rejects the literal empty
+        # string as "Invalid data".
         - name: Import GPG key
           env:
             GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
             GPG_PASSPHRASE: ${{ secrets.GPG_PASSWORD }}
           run: |
             command -v gpg >/dev/null 2>&1 || brew install gnupg
-            printf '%b' "$GPG_KEY" | gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --import
             echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
             echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
             gpgconf --reload gpg-agent
+            if [ -n "$GPG_PASSPHRASE" ]; then
+              printf '%b' "$GPG_KEY" | gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --import
+            else
+              printf '%b' "$GPG_KEY" | gpg --batch --pinentry-mode loopback --import
+            fi
 
         # The Testcontainers IT suite (jvmTest) was already run on the
         # Linux gate job; on the publish host we just compile the Apple
