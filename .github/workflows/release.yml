@@ -85,11 +85,10 @@ jobs:
             fi
             ls "${KONAN_DIR}/konan/konan.properties"
 
-        # Linux is the host: arm64 and mingw toolchains are cross targets
-        # here, downloaded so the host-side compileKotlinLinuxArm64 /
-        # compileKotlinMingwX64 tasks can resolve headers.
-        - name: Pre-fetch cross toolchains
-          run: ./gradlew downloadKonanToolchainLinux_arm64 downloadKonanToolchainMingw_x64 --stacktrace
+        # Linux x86_64 is the host. Kotlin/Native 2.x auto-downloads
+        # cross toolchains (linuxArm64, mingwX64) on first compile of
+        # the corresponding target — no separate downloadKonanToolchain*
+        # task exists in this version.
 
         # Testcontainers spins up postgres:16-alpine via the runner's
         # docker daemon automatically. The IT suite (AbstractPgContainer)
@@ -159,15 +158,10 @@ jobs:
             fi
             ls "${KONAN_DIR}/konan/konan.properties"
 
-        # macOS is the host, so EVERY non-Apple target is a cross target
-        # here.
-        - name: Pre-fetch cross toolchains
-          run: >-
-            ./gradlew
-            downloadKonanToolchainLinux_x64
-            downloadKonanToolchainLinux_arm64
-            downloadKonanToolchainMingw_x64
-            --stacktrace
+        # macOS aarch64 is the host. Kotlin/Native 2.x auto-downloads
+        # cross toolchains (linuxX64, linuxArm64, mingwX64) on first
+        # compile of the corresponding target — no separate
+        # downloadKonanToolchain* task exists in this version.
 
         # The GPG private key is stored in GitHub secrets with literal
         # `\n` escapes (one-line encoding). `printf '%b'` interprets
