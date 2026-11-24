@@ -35,9 +35,6 @@ kotlin {
             implementation(libs.kotlinx.datetime)
             implementation(libs.whyoleg.cryptography.core)
             implementation(libs.whyoleg.cryptography.optimal)
-            // kdatabase — контракты соединения и пул. Драйвер зависит от
-            // контрактов, но не наоборот: kpostgres работает и без пула.
-            api("pw.binom.db:kdatabase:0.1.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
