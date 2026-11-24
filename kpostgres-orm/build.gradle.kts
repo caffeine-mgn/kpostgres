@@ -3,6 +3,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    // @Serializable в тестах: сущности объявлены здесь же, без плагина
+    // компилятор не сгенерирует сериализаторы, и .serializer() не найдётся.
+    alias(libs.plugins.kotlin.serialization)
     `maven-publish`
 }
 
@@ -31,6 +34,10 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+        }
+        jvmTest.dependencies {
+            // Сквозной тест: корутины и kotlin-test для runTest.
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
         }
     }
 }
