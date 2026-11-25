@@ -64,6 +64,29 @@ class PgConnectionAdapter(
 
     private var currentMode: TransactionMode = TransactionMode.READ_COMMITTED
 
+    /**
+     * Потоковый запрос через портал.
+     *
+     * ## Почему транзакция начинается здесь
+     *
+     * Портал живёт только внутри транзакции: вне неё `Sync` его уничтожает,
+     * и сервер молча отдаёт всё разом — ровно та болезнь, от которой уходим.
+     * Требовать от вызывающего «не забудь BEGIN» значит гарантированно
+     * получить её при первом же забывании, причём без ошибки: данные придут
+     * верные, просто все сразу.
+     *
+     * Транзакция остаётся открытой до [ResultSet.close]: закрытие портала
+     * коммитит её. Читателю это безразлично (он только читает), а снимок
+     * снимает ровно на время чтения.
+     */
+    override suspend fun queryStream(sql: String, fetchSize: Int): ResultSet {
+        require(fetchSize > 0) { "fetchSize должен быть > 0" }
+        val ownTransaction = client.transactionStatus == 'I'
+        if (ownTransaction) exec("BEGIN")
+        val portal = client.executeStream(sql, emptyList(), fetchSize)
+        return PgStreamResultSet(portal, fetchSize)
+    }
+
     override suspend fun setTransactionMode(mode: TransactionMode) {
         currentMode = mode
         // Уровень применится при beginTransaction: `SET TRANSACTION ISOLATION

@@ -13,6 +13,7 @@ import pw.binom.db.kpostgresql.internal.executeSimpleQuery
 import pw.binom.db.kpostgresql.internal.readAuthentication
 import pw.binom.db.kpostgresql.internal.readErrorResponse
 import pw.binom.db.kpostgresql.internal.readNoticeResponse
+import pw.binom.db.kpostgresql.internal.startStream
 import pw.binom.db.kpostgresql.internal.readParameterStatus
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,24 @@ public class PostgresClient internal constructor(
             runCatching { connection.executeSimpleQuery("ROLLBACK") }
             throw e
         }
+    }
+
+    /**
+     * Потоковый запрос через портал сервера.
+     *
+     * Возвращает дескриптор: строки берутся порциями через
+     * [pw.binom.db.kpostgresql.PgPortal.nextBatch]. Соединение **обязано**
+     * быть в транзакции — иначе `Sync` уничтожит портал и сервер отдаст всё
+     * разом. Метод транзакцию не начинает: это решение вызывающего.
+     */
+    public suspend fun executeStream(
+        sql: String,
+        params: List<Any?> = emptyList(),
+        fetchSize: Int = 512,
+    ): PgPortal {
+        val types = params.map { pgTypeOf(it) }
+        val handle = connection.startStream(sql, types, params, fetchSize)
+        return PgPortal(handle, params)
     }
 
     public val isClosed: Boolean

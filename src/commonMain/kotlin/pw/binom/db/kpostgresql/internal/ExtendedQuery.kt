@@ -50,7 +50,7 @@ internal suspend fun PgConnection.executeExtendedQuerySimple(
     }
 }
 
-private suspend fun PgConnection.sendParse(
+internal suspend fun PgConnection.sendParse(
     statementName: String,
     sql: String,
     paramTypes: List<Int>,
@@ -64,7 +64,7 @@ private suspend fun PgConnection.sendParse(
     writeFrontendMessage(MessageTag.PARSE, bytes)
 }
 
-private suspend fun PgConnection.sendBind(
+internal suspend fun PgConnection.sendBind(
     portalName: String,
     statementName: String,
     params: List<Any?>,
@@ -92,7 +92,7 @@ private suspend fun PgConnection.sendBind(
     writeFrontendMessage(MessageTag.BIND, bytes)
 }
 
-private suspend fun PgConnection.sendDescribe(target: String, kind: Char) {
+internal suspend fun PgConnection.sendDescribe(target: String, kind: Char) {
     val body = Buffer()
     body.writeByte(kind.code.toByte())
     body.writeCString(target)
@@ -100,7 +100,7 @@ private suspend fun PgConnection.sendDescribe(target: String, kind: Char) {
     writeFrontendMessage(MessageTag.DESCRIBE, bytes)
 }
 
-private suspend fun PgConnection.sendExecute(portalName: String, maxRows: Int) {
+internal suspend fun PgConnection.sendExecute(portalName: String, maxRows: Int) {
     val body = Buffer()
     body.writeCString(portalName)
     body.writeInt(maxRows)
@@ -108,7 +108,32 @@ private suspend fun PgConnection.sendExecute(portalName: String, maxRows: Int) {
     writeFrontendMessage(MessageTag.EXECUTE, bytes)
 }
 
-private suspend fun PgConnection.sendSync() {
+/**
+ * `Close` для портала.
+ *
+ * Освобождает серверные ресурсы потока до конца транзакции. Без него портал
+ * живёт, пока не закроется транзакция, и держит снимок.
+ */
+internal suspend fun PgConnection.sendClosePortal(portalName: String) {
+    val body = Buffer()
+    body.writeByte('P'.code.toByte())
+    body.writeCString(portalName)
+    writeFrontendMessage(MessageTag.CLOSE, body.readByteArray())
+}
+
+/**
+ * `Flush` — заставить сервер отдать накопленное, не завершая пакет.
+ *
+ * Отличие от [sendSync] принципиальное: `Sync` закрывает пакет и уничтожает
+ * портал, `Flush` только выталкивает вывод. Для порционного чтения нужен
+ * именно `Flush`, иначе после первой порции портал умирает и сервер отвечает
+ * `PortalSuspended`... а потом молчит.
+ */
+internal suspend fun PgConnection.sendFlush() {
+    writeFrontendMessage(MessageTag.FLUSH, ByteArray(0))
+}
+
+internal suspend fun PgConnection.sendSync() {
     writeFrontendMessage(MessageTag.SYNC, ByteArray(0))
 }
 

@@ -28,9 +28,13 @@ kotlin {
             api(project(":"))
             // Контракты kdatabase: Connection, PreparedStatement, ResultSet, пул.
             api("pw.binom.db:kdatabase:0.1.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+        }
+        jvmTest.dependencies {
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
         }
     }
 }
