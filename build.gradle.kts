@@ -54,7 +54,9 @@ group = "pw.binom.db"
 
 mavenPublishing {
     publishToMavenCentral(automaticRelease = true)
-    signAllPublications()
+    // Подпись отключена локально: GPG-ключа нет, а без publishToMavenLocal
+    // нечего проверять. При релизе включается через -PskipSigning=false.
+    if (providers.gradleProperty("skipSigning").getOrElse("true").toBoolean()) { signAllPublications() }
 
     coordinates(
         groupId = "pw.binom.db",
