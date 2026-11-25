@@ -2,7 +2,6 @@ package pw.binom.db.kpostgresql.pool
 
 import pw.binom.db.ColumnType
 import pw.binom.db.ResultSet
-import pw.binom.db.Row
 import pw.binom.db.SqlValue
 import pw.binom.db.kpostgresql.PgPortal
 import kotlin.time.Instant
@@ -14,14 +13,11 @@ import kotlin.uuid.Uuid
  *
  * ## Чем отличается от обычного
  *
- * Обычный [pgResultSet] получает все строки сразу и потому имеет синхронный
- * [next]. Здесь строки приходят порциями по сети, поэтому:
- *
- * * [next] **не работает** — бросает `UnsupportedOperationException`:
- *   синхронный метод не может ждать сеть, а притворяться, что может, значит
- *   вешать поток;
- * * строки берутся через `fetchRows` из `kdatabase` — он `suspend`;
- * * [isStreaming] = `true`, чтобы вызывающий выбрал правильный путь.
+ * Обычный набор получает все строки сразу. Здесь строки приходят порциями
+ * по сети, поэтому [next] `suspend` — и это единственное отличие для
+ * вызывающего.
+ * * [next] сам докачивает порцию, когда текущая исчерпана, — поэтому он
+ *   `suspend`, и об этом знает только сигнатура, а не вызывающий код.
  *
  * ## Память
  *
@@ -35,8 +31,6 @@ internal class PgStreamResultSet(
 
     override val columns: List<String> = portal.columns.map { it.name }
 
-    override val isStreaming: Boolean get() = true
-
     private var batch: List<Array<ByteArray?>> = emptyList()
     private var pos: Int = -1
     private var exhausted: Boolean = false
@@ -49,38 +43,29 @@ internal class PgStreamResultSet(
         portal.columns.getOrNull(index)?.let { oidToColumnType(it.typeOid) } ?: ColumnType.OTHER
 
     /**
-     * Не поддерживается: синхронный метод не может дождаться сети.
+     * Следующая строка.
      *
-     * Если нужен построчный обход потокового набора — использовать
-     * `fetchRows`/`rowSequence` из `kdatabase`.
+     * Если порция исчерпана — докачивает следующую у сервера. Отсюда
+     * `suspend`: ожидание сети живёт в сигнатуре, и вызывающему не нужно
+     * знать, кончилась пачка или нет.
      */
-    override fun next(): Boolean = throw UnsupportedOperationException(
-        "потоковый набор читается через fetchRows, а не next()",
-    )
-
-    /**
-     * Следующая порция строк.
-     *
-     * Переопределяет `ResultSet.fetchRows`: у потокового набора порция
-     * приходит из портала, а не из памяти.
-     */
-    override suspend fun fetchRows(size: Int): List<Row> {
-        if (exhausted) return emptyList()
-
-        val rows = portal.nextBatch()
-        if (rows.isEmpty()) {
-            exhausted = true
-            return emptyList()
+    override suspend fun next(): Boolean {
+        pos += 1
+        if (pos < batch.size) return true
+        // Порция исчерпана: тянем следующую.
+        while (true) {
+            val rows = portal.nextBatch()
+            if (rows.isEmpty()) {
+                exhausted = true
+                batch = emptyList()
+                pos = -1
+                return false
+            }
+            batch = rows
+            pos = 0
+            rowsRead += rows.size
+            if (batch.isNotEmpty()) return true
         }
-
-        batch = rows
-        pos = -1
-        rowsRead += rows.size
-
-        // Последняя порция: сервер отдал меньше запрошенного — больше не будет.
-        if (rows.size < fetchSize) exhausted = true
-
-        return rows.map { ConcreteRow(columns, it) }
     }
 
     override fun isNull(index: Int): Boolean = current()[index] == null
@@ -105,7 +90,7 @@ internal class PgStreamResultSet(
     private fun current(): Array<ByteArray?> {
         val p = pos
         if (p < 0 || p >= batch.size) {
-            throw IllegalStateException("нет текущей строки: потоковый набор читается через fetchRows")
+            throw IllegalStateException("нет текущей строки: сначала вызовите next()")
         }
         return batch[p]
     }
@@ -133,42 +118,14 @@ internal class PgStreamResultSet(
 }
 
 
-/**
- * Строка, отделённая от курсора.
- *
- * Нужна потому, что потоковый курсор качает следующую порцию, пока
- * потребитель обрабатывает текущую строку: держать строку «внутри» курсора
- * нельзя — данные перезапишутся.
- */
-internal class ConcreteRow(
-    override val columns: List<String>,
-    private val values: Array<ByteArray?>,
-) : Row {
-
-    override fun isNull(index: Int): Boolean = values[index] == null
-
-    override fun getString(index: Int): String? = values[index]?.let { decodeUtf8Text(it) }
-    override fun getBoolean(index: Int): Boolean? = values[index]?.let { parseBoolText(it) }
-    override fun getInt(index: Int): Int? = values[index]?.let { decodeUtf8Text(it).trim().toInt() }
-    override fun getLong(index: Int): Long? = values[index]?.let { decodeUtf8Text(it).trim().toLong() }
-    override fun getDouble(index: Int): Double? = values[index]?.let { decodeUtf8Text(it).trim().toDouble() }
-    override fun getBytes(index: Int): ByteArray? = values[index]
-
-    override fun getInstant(index: Int): Instant? =
-        values[index]?.let { decodeUtf8Text(it) }?.let { parsePgTimestamp(it) }
-
-    @OptIn(ExperimentalUuidApi::class)
-    override fun getUuid(index: Int): Uuid? =
-        values[index]?.let { Uuid.parse(decodeUtf8Text(it)) }
-}
 
 /**
  * Разбор текстового представления значения.
  *
  * Потоковый запрос идёт с `resultFormat = 0` (текст): бинарный формат
  * требует знать тип каждой колонки на клиенте до `Bind`, а типы приходят
- * только в `RowDescription` после `Describe`. Текст разбирается здесь, на
- * клиенте, — это медленнее бинарного, зато не требует второго раунда.
+ * только в `RowDescription` после `Describe`. Текст разбирается на клиенте —
+ * медленнее бинарного, зато без второго раунда.
  */
 internal fun decodeUtf8Text(raw: ByteArray): String = raw.decodeToString()
 

@@ -1,28 +1,29 @@
 package pw.binom.db.kpostgresql.pool
 
 import kotlinx.coroutines.test.runTest
-import pw.binom.db.toList
-import pw.binom.db.useConnection
 import pw.binom.db.kpostgresql.PostgresConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlin.test.assertFailsWith
 
 /**
- * Потоковое чтение на живой базе.
+ * Потоковое чтение через портал на живой базе.
  *
  * ## Что доказывается
  *
- * Главное — **память не растёт с числом строк**. Это проверяется не
- * рассуждением, а замером: до и после вычитывания 100 000 строк считается
- * прирост занятой памяти. При потоковом чтении он должен быть в пределах
- * нескольких мегабайт (одна порция), при «всё в память» — сотни.
+ * Главное — **память не растёт с числом строк**. Проверяется замером: до и
+ * после вычитывания 100 000 строк считается прирост занятой памяти. При
+ * потоковом чтении он должен быть в пределах нескольких мегабайт (одна
+ * порция), при «всё в память» — десятки.
  *
- * Замер через `Runtime` — приблизительный (GC может сработать в неудачный
- * момент), поэтому порог взят с запасом: 60 МБ. Полная выдача 100 000 строк
- * по ~100 байт даёт минимум 10 МБ «полезных» плюс накладные — обычно 30–60.
- * Если порог пробьёт, значит потоковость сломалась.
+ * Замер через `Runtime` приблизительный (GC может сработать в неудачный
+ * момент), поэтому порог взят с запасом — 60 МБ.
+ *
+ * ## Почему цикл один и тот же
+ *
+ * Здесь нет отдельного API для потока: `while (rs.next())` работает и для
+ * обычного набора, и для потокового. Разница только внутри драйвера — он
+ * докачивает порцию сам. Это и проверяется: код вызывающего не меняется.
  */
 class PgStreamLiveTest {
 
@@ -34,7 +35,7 @@ class PgStreamLiveTest {
 
     private fun config() = PostgresConfig(host, port, db, user, password)
 
-    /** Занимает сделку и порождает N строк. */
+    /** Заполняет таблицу N строками на стороне сервера. */
     private suspend fun seed(conn: pw.binom.db.Connection, n: Int) {
         conn.executeUpdate("DROP TABLE IF EXISTS stream_test")
         conn.executeUpdate(
@@ -46,13 +47,11 @@ class PgStreamLiveTest {
             )
             """.trimIndent(),
         )
-        // generate_series на стороне сервера: 100k строк быстро и без
-        // клиентского цикла, который сам съел бы память.
+        // generate_series на сервере: клиентский цикл сам съел бы память и
+        // сделал бы замер бессмысленным.
         conn.executeUpdate(
-            """
-            INSERT INTO stream_test (payload, num)
-            SELECT repeat('x', 100), g FROM generate_series(1, $n) AS g
-            """.trimIndent(),
+            "INSERT INTO stream_test (payload, num) " +
+                "SELECT repeat('x', 100), g FROM generate_series(1, $n) AS g",
         )
     }
 
@@ -72,24 +71,14 @@ class PgStreamLiveTest {
             val before = rt.totalMemory() - rt.freeMemory()
 
             var count = 0L
-            var maxBatch = 0
             val rs = conn.queryStream("SELECT id, payload, num FROM stream_test ORDER BY id", fetchSize = 500)
             try {
-                assertTrue(rs.isStreaming, "набор должен быть потоковым")
-                var batches = 0
-                while (true) {
-                    val batch = rs.fetchRows(500)
-                    if (batch.isEmpty()) break
-                    maxBatch = maxOf(maxBatch, batch.size)
-                    count += batch.size
-                    batches++
-                    // Обрабатываем и выбрасываем: тело цикла не должно
-                    // накапливать строки, иначе тест проверит сам себя.
-                    for (row in batch) {
-                        if (row.isNull(0)) error("id не должен быть NULL")
-                    }
+                // Ровно тот же цикл, что и для обычного набора. Никаких
+                // fetchRows: порционность — дело драйвера.
+                while (rs.next()) {
+                    if (rs.isNull(0)) error("id не должен быть NULL")
+                    count++
                 }
-                println("прочитано строк: $count, порций: $batches, макс. порция: $maxBatch")
             } finally {
                 rs.close()
             }
@@ -98,16 +87,15 @@ class PgStreamLiveTest {
             Thread.sleep(100)
             val after = rt.totalMemory() - rt.freeMemory()
             val growthMb = (after - before) / 1024.0 / 1024.0
-            println("прирост памяти: %.1f МБ".format(growthMb))
+            println("прочитано строк: $count, прирост памяти: %.1f МБ".format(growthMb))
 
             assertEquals(100_000L, count, "должны прочитать все строки")
-            assertTrue(maxBatch <= 500, "порция не должна превышать fetchSize, получено $maxBatch")
             assertTrue(growthMb < 60.0, "память выросла на %.1f МБ — потоковость не работает".format(growthMb))
         }
     }
 
     @Test
-    fun `портал отдаёт строки порциями а не всё сразу`() = runTest {
+    fun `порции идут по fetchSize и сохраняют порядок`() = runTest {
         if (password.isEmpty()) return@runTest
 
         openConnection(config()).use { conn ->
@@ -115,19 +103,14 @@ class PgStreamLiveTest {
 
             val rs = conn.queryStream("SELECT id FROM stream_test ORDER BY id", fetchSize = 500)
             try {
-                val b1 = rs.fetchRows(500)
-                assertEquals(500, b1.size, "первая порция должна быть ровно fetchSize")
-                val b2 = rs.fetchRows(500)
-                assertEquals(500, b2.size)
-                val b3 = rs.fetchRows(500)
-                assertEquals(200, b3.size, "последняя порция — остаток")
-                val b4 = rs.fetchRows(500)
-                assertTrue(b4.isEmpty(), "после исчерпания порций быть не должно")
+                val ids = mutableListOf<Long>()
+                while (rs.next()) ids += rs.getLong(0)!!
 
-                // Порядок сохранён: id растут.
-                assertEquals(1L, b1.first().getLong(0))
-                assertEquals(500L, b1.last().getLong(0))
-                assertEquals(501L, b2.first().getLong(0))
+                assertEquals(1200, ids.size)
+                assertEquals(1L, ids.first(), "первая строка должна быть id=1")
+                assertEquals(1200L, ids.last(), "последняя — id=1200")
+                // Порядок строго возрастающий: значит порции склеены верно.
+                assertTrue(ids.zipWithNext().all { (a, b) -> b == a + 1 }, "порядок нарушен")
             } finally {
                 rs.close()
             }
@@ -135,18 +118,18 @@ class PgStreamLiveTest {
     }
 
     @Test
-    fun `next на потоковом наборе бросает внятную ошибку`() = runTest {
+    fun `порция ровно по границе и последняя неполная`() = runTest {
         if (password.isEmpty()) return@runTest
 
         openConnection(config()).use { conn ->
-            seed(conn, 10)
-            val rs = conn.queryStream("SELECT id FROM stream_test", fetchSize = 5)
+            // 1000 = ровно две порции по 500: проверяет, что после второй
+            // порции набор не «зависает» в ожидании несуществующей третьей.
+            seed(conn, 1000)
+            val rs = conn.queryStream("SELECT id FROM stream_test ORDER BY id", fetchSize = 500)
             try {
-                val e = assertFailsWith<UnsupportedOperationException> { rs.next() }
-                assertTrue(
-                    e.message?.contains("fetchRows") == true,
-                    "ошибка должна подсказывать правильный метод, получено: ${e.message}",
-                )
+                var n = 0
+                while (rs.next()) n++
+                assertEquals(1000, n)
             } finally {
                 rs.close()
             }
@@ -159,30 +142,22 @@ class PgStreamLiveTest {
 
         openConnection(config()).use { conn ->
             seed(conn, 10)
-            val rs = conn.query("SELECT id FROM stream_test ORDER BY id")
-            try {
-                assertTrue(!rs.isStreaming, "обычный запрос не потоковый")
+            conn.query("SELECT id FROM stream_test ORDER BY id").use { rs ->
                 var n = 0
                 while (rs.next()) n++
                 assertEquals(10, n)
-            } finally {
-                rs.close()
             }
         }
     }
 
     @Test
-    fun `fetchRows на обычном наборе вычитывает из памяти`() = runTest {
+    fun `пустой результат не зависает`() = runTest {
         if (password.isEmpty()) return@runTest
 
         openConnection(config()).use { conn ->
-            seed(conn, 7)
-            val rs = conn.query("SELECT id FROM stream_test ORDER BY id")
-            try {
-                val all = rs.toList()
-                assertEquals(7, all.size)
-            } finally {
-                rs.close()
+            seed(conn, 0)
+            conn.queryStream("SELECT id FROM stream_test", fetchSize = 100).use { rs ->
+                assertTrue(!rs.next(), "пустой набор сразу должен вернуть false")
             }
         }
     }

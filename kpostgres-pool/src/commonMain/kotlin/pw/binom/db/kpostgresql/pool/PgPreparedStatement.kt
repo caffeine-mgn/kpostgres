@@ -101,7 +101,7 @@ internal class PgResultSet(
         return oidToColumnType(meta.typeOid)
     }
 
-    override fun next(): Boolean = rows.next()
+    override suspend fun next(): Boolean = rows.next()
 
     override fun isNull(index: Int): Boolean = rows.isNull(index)
 
@@ -136,7 +136,7 @@ internal class PgResultSet(
 internal object EmptyResultSet : ResultSet {
     override val columns: List<String> = emptyList()
     override fun columnType(index: Int): ColumnType = ColumnType.OTHER
-    override fun next(): Boolean = false
+    override suspend fun next(): Boolean = false
     override fun isNull(index: Int): Boolean = true
     override fun getString(index: Int): String? = null
     override fun getBoolean(index: Int): Boolean? = null
