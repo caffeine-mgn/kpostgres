@@ -3,7 +3,6 @@ package pw.binom.db.kpostgresql.pool
 import pw.binom.db.ColumnType
 import pw.binom.db.ResultSet
 import pw.binom.db.SqlValue
-import pw.binom.db.kpostgresql.PgPortal
 import kotlin.time.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -25,11 +24,11 @@ import kotlin.uuid.Uuid
  * и строке в 1 КБ это полмегабайта независимо от размера таблицы.
  */
 internal class PgStreamResultSet(
-    private val portal: PgPortal,
+    private val portal: PortalSource,
     private val fetchSize: Int,
 ) : ResultSet {
 
-    override val columns: List<String> = portal.columns.map { it.name }
+    override val columns: List<String> = portal.columns
 
     private var batch: List<Array<ByteArray?>> = emptyList()
     private var pos: Int = -1
@@ -40,7 +39,7 @@ internal class PgStreamResultSet(
         private set
 
     override fun columnType(index: Int): ColumnType =
-        portal.columns.getOrNull(index)?.let { oidToColumnType(it.typeOid) } ?: ColumnType.OTHER
+        portal.columnTypes.getOrNull(index) ?: ColumnType.OTHER
 
     /**
      * Следующая строка.
@@ -52,6 +51,8 @@ internal class PgStreamResultSet(
     override suspend fun next(): Boolean {
         pos += 1
         if (pos < batch.size) return true
+        // Портал уже исчерпан — не ходим к серверу за пустотой.
+        if (exhausted) return false
         // Порция исчерпана: тянем следующую.
         while (true) {
             val rows = portal.nextBatch()
@@ -64,6 +65,10 @@ internal class PgStreamResultSet(
             batch = rows
             pos = 0
             rowsRead += rows.size
+            // Неполная порция — признак конца: сервер отдал меньше
+            // запрошенного только когда данных больше нет. Экономит один
+            // сетевой обход на каждый набор, кончающийся не на границе.
+            if (rows.size < fetchSize) exhausted = true
             if (batch.isNotEmpty()) return true
         }
     }

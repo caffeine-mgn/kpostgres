@@ -35,10 +35,7 @@ kotlin {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
-        jvmTest.dependencies {
-            // Сквозной тест: корутины и kotlin-test для runTest.
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
-        }
+
     }
 }
 

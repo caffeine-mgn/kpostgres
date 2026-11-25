@@ -84,7 +84,7 @@ class PgConnectionAdapter(
         val ownTransaction = client.transactionStatus == 'I'
         if (ownTransaction) exec("BEGIN")
         val portal = client.executeStream(sql, emptyList(), fetchSize)
-        return PgStreamResultSet(portal, fetchSize)
+        return PgStreamResultSet(PgPortalSource(portal), fetchSize)
     }
 
     override suspend fun setTransactionMode(mode: TransactionMode) {
