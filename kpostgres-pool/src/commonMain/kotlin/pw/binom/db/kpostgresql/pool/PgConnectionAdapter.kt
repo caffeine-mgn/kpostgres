@@ -65,6 +65,26 @@ class PgConnectionAdapter(
     private var currentMode: TransactionMode = TransactionMode.READ_COMMITTED
 
     /**
+     * Открыта ли транзакция сейчас.
+     *
+     * ## Зачем нужен этот флаг
+     *
+     * Контракт `kdatabase` объявляет [isInTransaction], но базовое значение —
+     * `false`. Без переопределения PG-соединение всегда отвечало «нет», и
+     * верхние слои (`korm`, сторы) не могли отличить «начать транзакцию» от
+     * «присоединиться к уже открытой». Цена ошибки — не лишний BEGIN, а
+     * потерянная атомарность: метод, вызванный внутри чужой транзакции,
+     * открывал собственную на другом соединении и коммитил половину работы
+     * независимо от исхода внешней.
+     *
+     * Именно так в провижинере аренда CID оставалась в БД после отката
+     * создания машины.
+     */
+    private var inTransaction = false
+
+    override val isInTransaction: Boolean get() = inTransaction
+
+    /**
      * Потоковый запрос через портал.
      *
      * ## Почему транзакция начинается здесь
@@ -94,14 +114,29 @@ class PgConnectionAdapter(
     }
 
     override suspend fun beginTransaction() {
+        // Вложенный BEGIN в Postgres — это WARNING "there is already a
+        // transaction in progress", а не ошибка: сервер молча игнорирует его,
+        // и последующий COMMIT закрывает ВНЕШНЮЮ транзакцию. Поэтому
+        // вложенный вызов — не «начать заново», а «я уже внутри».
+        if (inTransaction) return
         exec("BEGIN ISOLATION LEVEL ${currentMode.sqlName()}")
+        inTransaction = true
     }
 
     override suspend fun commit() {
+        // Симметрично: COMMIT без открытой транзакции Postgres выполнит, но
+        // это скрывает логическую ошибку вызывающего, а не исправляет её.
+        if (!inTransaction) return
         exec("COMMIT")
+        inTransaction = false
     }
 
     override suspend fun rollback() {
+        if (!inTransaction) return
+        // Флаг снимается до exec: если ROLLBACK упал из-за обрыва связи,
+        // соединение всё равно уже не в транзакции (сервер её закрыл), и
+        // оставлять флаг взведённым значит врать о состоянии.
+        inTransaction = false
         exec("ROLLBACK")
     }
 
