@@ -36,6 +36,10 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+            // Пул проверяется против настоящего сервера: фейк не покажет, что
+            // соединение, открытое фабрикой,годно для запросов.
+            implementation(libs.testcontainers.postgresql)
+            implementation(libs.testcontainers.junit)
         }
     }
 }
