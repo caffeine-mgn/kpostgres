@@ -74,15 +74,44 @@ internal class PgPreparedStatement(
     /**
      * Значения в порядке позиций.
      *
-     * Позиция `i` соответствует `names[i]`. Берём привязку по индексу имени,
-     * поэтому повторяющееся имя автоматически получает одно значение на все
-     * свои `$N` — Postgres ждёт ровно `names.size` параметров.
+     * **SQL с `:name`** ([names] непуст). Позиция `i` соответствует `names[i]`:
+     * привязка по индексу имени даёт повторному имени то же значение на всех его
+     * `$N`, а Postgres ждёт ровно `names.size` параметров. Нумерация
+     * [ParamConverter] такова, что индекс имени совпадает с номером `$N` минус
+     * один, так что обе трактовки здесь не расходятся.
+     *
+     * **SQL с готовыми `$N`** ([names] пуст). [ParamConverter] такие номера не
+     * переписывает, имён нет — и брать значения, кроме как из самих позиций,
+     * неоткуда. Без этой ветки `bind(0, …)` на `WHERE id = $1` молча давало
+     * «ноль параметров», и сервер отвечал `bind message supplies 0 parameters,
+     * but prepared statement "" requires 1`: ошибка терялась до round-trip.
+     * Контракт [PreparedStatement] обещает позиционную привязку — держим её.
      */
-    private fun collectParams(): List<Any?> = names.indices.map { pos ->
+    private fun collectParams(): List<Any?> = collectPgParams(names, bound)
+
+    override fun close() = Unit
+}
+
+/**
+ * Собирает значения параметров в позиционном порядке.
+ *
+ * Вынесено из [PgPreparedStatement.collectParams] отдельной функцией, чтобы
+ * проверять обе ветки без соединения и сервера: сама логика от драйвера не
+ * зависит. При непустых [names] позиция берётся по индексу имени, иначе — по
+ * фактическим ключам [bound]; пропуски заполняются `NULL`.
+ */
+internal fun collectPgParams(
+    names: List<String>,
+    bound: Map<Int, SqlValue>,
+): List<Any?> = when {
+    names.isNotEmpty() -> names.indices.map { pos ->
         (bound[pos] ?: SqlValue.Null).toPgParam()
     }
 
-    override fun close() = Unit
+    else -> {
+        val count = (bound.keys.maxOrNull() ?: -1) + 1
+        (0 until count).map { (bound[it] ?: SqlValue.Null).toPgParam() }
+    }
 }
 
 /**
@@ -157,21 +186,29 @@ internal object EmptyResultSet : ResultSet {
  *
  * Форматы, которые отдаёт сервер:
  * * `2026-11-25 01:47:00` — timestamp без зоны;
- * * `2026-11-25 01:47:00.123` — с микросекундами;
- * * `2026-11-25 01:47:00+03` — timestamptz со смещением.
+ * * `2026-11-25 01:47:00.123456` — с микросекундами;
+ * * `2026-11-25 01:47:00+03` — timestamptz со смещением;
+ * * `2020-01-01` — date, времени нет.
  *
- * `Instant.parse` принимает только ISO-8601 с `Z`, поэтому приводим:
- * пробел → `T`, обрезаем микросекунды до миллисекунд, отсутствующую зону
- * считаем UTC (для `timestamp` это единственное осмысленное допущение —
- * Postgres не хранит зону).
+ * `Instant.parse` требует `Z`, поэтому приводим: пробел → `T`, смещение →
+ * `±hh:mm`, отсутствующую зону считаем UTC (для `timestamp` это единственное
+ * осмысленное допущение — Postgres зону не хранит). Дробную часть не режем:
+ * парсер принимает наносекунды, а подрезание до миллисекунд молча теряет
+ * микросекунды — те самые, которые лежат в `timestamp(6)`.
+ *
+ * `date` приходит без времени (`2020-01-01`), поэтому дополняем его до
+ * полуночи UTC. Наличие зоны определяем по фактически найденному смещению
+ * или `Z`, а не по длине строки: длина ничего не говорит о формате.
  */
 internal fun parsePgTimestamp(raw: String): Instant? {
     var s = raw.trim().replace(' ', 'T')
     if (s.isEmpty()) return null
 
-    // Смещение вида +03 или +0300 → +03:00
+    // Смещение вида +03, +0300 или +03:00 → +03:00
     val signIdx = s.indexOfLast { it == '+' || it == '-' }
+    var hasZone = s.endsWith("Z")
     if (signIdx > 10) {
+        hasZone = true
         val off = s.substring(signIdx)
         s = s.substring(0, signIdx)
         val digits = off.drop(1).replace(":", "")
@@ -180,18 +217,10 @@ internal fun parsePgTimestamp(raw: String): Instant? {
         s = "$s${off[0]}$hh:$mm"
     }
 
-    // Микросекунды → миллисекунды: 6 знаков после точки режем до 3.
-    val dot = s.indexOf('.')
-    if (dot > 0) {
-        var endOfFrac = dot + 1
-        while (endOfFrac < s.length && s[endOfFrac].isDigit()) endOfFrac++
-        val frac = s.substring(dot + 1, endOfFrac)
-        if (frac.length > 3) {
-            s = s.substring(0, dot + 1) + frac.take(3) + s.substring(endOfFrac)
-        }
-    }
+    // `date` приходит как `2020-01-01`: времени нет, берём полночь UTC.
+    if (s.length == 10) s = "${s}T00:00:00"
 
-    if (!s.endsWith("Z") && s.length <= 19) s = "${s}Z"
+    if (!hasZone) s = "${s}Z"
 
     return runCatching { Instant.parse(s) }.getOrNull()
 }
